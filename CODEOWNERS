@@ -1,0 +1,9 @@
+# Centralised location, distributed ownership.
+# The database-level enforcement is in the role grants; this is the review gate.
+
+/faue_db/gateway/    @gateway-owner
+/faue_db/ase/        @ase-owner
+/faue_db/catalog/    @catalog-owner
+/faue_db/media/      @media-owner
+/migrations/         @backend-lead
+/tests/              @backend-lead
