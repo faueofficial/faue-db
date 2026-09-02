@@ -17,10 +17,18 @@ class EncryptedStr(TypeDecorator):
     cache_ok = True
 
     def process_bind_param(self, value, dialect):  # noqa: ANN001, ANN201
-        raise NotImplementedError("wire faue_core.crypto.EnvelopeEncryptor at session setup")
+        if value is None:
+            return None
+        from faue_core.crypto import get_encryptor
+
+        return get_encryptor().encrypt(value)
 
     def process_result_value(self, value, dialect):  # noqa: ANN001, ANN201
-        raise NotImplementedError("wire faue_core.crypto.EnvelopeEncryptor at session setup")
+        if value is None:
+            return None
+        from faue_core.crypto import get_encryptor
+
+        return get_encryptor().decrypt(bytes(value))
 
 
 class BlindIndex(TypeDecorator):

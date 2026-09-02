@@ -1,0 +1,55 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: faue
+          POSTGRES_PASSWORD: faue_local_dev
+          POSTGRES_DB: faue_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U faue"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://faue:faue_local_dev@localhost:5432/faue_test
+      TEST_DATABASE_URL: postgresql://faue:faue_local_dev@localhost:5432/faue_test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+
+      - name: Install
+        run: pip install -e . && pip install pytest alembic psycopg2-binary pgvector ruff
+
+      - name: pgvector extension
+        run: psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector"
+
+      # --- the gates this repository exists for ---
+
+      - name: Migrations apply
+        run: alembic upgrade head
+
+      - name: Models match migrations
+        # A model edited without a migration cannot merge. This is the
+        # guarantee the whole repository rests on.
+        run: alembic check
+
+      - name: Downgrade round-trips
+        # A broken downgrade is otherwise discovered during an incident,
+        # which is the worst possible time.
+        run: alembic downgrade base && alembic upgrade head
+
+      - name: Schema invariants
+        # cross-schema FKs, workspace_id coverage (ADR 0021),
+        # plaintext PII, naive timestamps
+        run: pytest tests/test_schema_invariants.py -q
+
+      - name: Lint
+        run: ruff check .

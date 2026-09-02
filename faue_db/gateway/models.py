@@ -89,6 +89,9 @@ class RefreshToken(Base, UUIDPrimaryKey):
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     family_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
     rotated_from: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    # Why the token was revoked. Without this, a normal logout is
+    # indistinguishable from token theft and the reuse alert drowns in noise.
+    revoked_reason: Mapped[str | None] = mapped_column(Text)  # rotated | logout | family_revoked
     user_agent: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -187,6 +190,65 @@ class QuizResponse(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     quiz_version: Mapped[str] = mapped_column(Text, nullable=False)
     answers: Mapped[dict] = mapped_column(JSONB, nullable=False)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# --- media (module — extractable) -------------------------------------------
+class Asset(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """An uploaded image, after the PII pipeline has finished with it.
+
+    Lives in the gateway schema because `media` is an M1-2 extraction; the same
+    arrangement as `notify`.
+
+    The per-stage booleans are not bookkeeping. They turn the compliance
+    question into a query rather than an argument:
+
+        SELECT count(*) FROM gateway.assets
+        WHERE status = 'ready' AND (NOT exif_stripped OR NOT faces_redacted);
+
+    which must always be zero. A pipeline bug becomes visible instead of silent.
+    """
+    __tablename__ = "assets"
+    __table_args__ = SCHEMA
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)      # vault | fabric | avatar
+    status: Mapped[str] = mapped_column(Text, nullable=False)    # pending | processing | ready | rejected
+    #: Why an image was refused. A closed set, so a spike is groupable.
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+
+    #: Where the derivative lives. The original is never addressable — it is
+    #: discarded once the derivative exists.
+    storage_key: Mapped[str | None] = mapped_column(Text)
+    thumb_key: Mapped[str | None] = mapped_column(Text)
+    preview_key: Mapped[str | None] = mapped_column(Text)
+    content_type: Mapped[str | None] = mapped_column(Text)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    bytes: Mapped[int | None] = mapped_column(Integer)
+
+    # --- pipeline audit ---
+    exif_stripped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    faces_redacted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    faces_found: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ocr_redacted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    safety_verdict: Mapped[str | None] = mapped_column(Text)
+    #: Keeping an original means keeping the unredacted face and the GPS
+    #: coordinates. It requires a consent purpose that does not exist yet, so
+    #: this stays false and the column is here to make that visible.
+    original_retained: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    #: When the derivative reached the backup replica.
+    #:
+    #: Null on a ready asset means the backup is missing it — which is what the
+    #: reconciliation worker sweeps for. Replication is deliberately not inline:
+    #: a transient backup outage must neither fail an upload nor be swallowed
+    #: into a silent gap discovered when the backup is finally needed.
+    backed_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # --- vault ------------------------------------------------------------------
@@ -298,9 +360,18 @@ class NotifyPreference(Base, WorkspaceScopedMixin):
 
 class NotifyDelivery(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     """The unique constraint is what makes redelivery safe: a replayed event
-    cannot produce a second push."""
+    cannot produce a second push.
+
+    `channel` is part of the key because one row *is* one channel. Without it
+    the first channel to claim an event locks out every other, so a message
+    meant for inbox and email only ever reached whichever ran first — and it
+    looked like correct deduplication.
+    """
     __tablename__ = "notify_deliveries"
-    __table_args__ = (UniqueConstraint("user_id", "template_id", "event_id"), SCHEMA)
+    __table_args__ = (
+        UniqueConstraint("user_id", "template_id", "event_id", "channel"),
+        SCHEMA,
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
     template_id: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
@@ -347,6 +418,13 @@ class AdminUser(Base, UUIDPrimaryKey):
     email_bidx: Mapped[str] = mapped_column(BlindIndex, unique=True, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     mfa_enrolled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    #: TOTP shared secret, encrypted at rest. Whoever holds this can mint valid
+    #: second factors, so it is exactly as sensitive as the account itself.
+    totp_secret_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    #: Set when enrolment is confirmed with a working code, not when the secret
+    #: is issued. An unconfirmed secret means the operator never successfully
+    #: scanned it, and treating that as enrolled locks them out permanently.
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(Text, default="active", nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

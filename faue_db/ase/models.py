@@ -18,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
 
 from faue_db.base import Base, UUIDPrimaryKey, WorkspaceScopedMixin
@@ -32,14 +33,18 @@ class UserStyleContext(Base, WorkspaceScopedMixin):
     __tablename__ = "user_style_context"
     __table_args__ = SCHEMA
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
+    # Dimension is unconstrained: several embedding models coexist during a
+    # migration and they have different dimensions.
+    dna_vector: Mapped[list[float] | None] = mapped_column(Vector())
+    aspiration_vector: Mapped[list[float] | None] = mapped_column(Vector())
+    behavior_vector: Mapped[list[float] | None] = mapped_column(Vector())
     constraints: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     wear_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     model_id: Mapped[str] = mapped_column(Text, nullable=False)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     stale_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # dna_vector / aspiration_vector / behavior_vector are pgvector columns added
-    # in the migration: dimension varies by embedding model and autogenerate does
-    # not handle partial HNSW indexes.
+    # HNSW indexes are added in the migration: autogenerate cannot express a
+    # partial index keyed on model_id.
 
 
 class VaultEmbedding(Base, WorkspaceScopedMixin):
@@ -53,6 +58,7 @@ class VaultEmbedding(Base, WorkspaceScopedMixin):
     dim: Mapped[int] = mapped_column(Integer, nullable=False)
     image_hash: Mapped[str] = mapped_column(Text, nullable=False)
     attributes: Mapped[dict | None] = mapped_column(JSONB)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -63,6 +69,7 @@ class AspirationEmbedding(Base, WorkspaceScopedMixin):
     model_id: Mapped[str] = mapped_column(Text, primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
     board_id: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -72,6 +79,7 @@ class FabricEmbedding(Base, WorkspaceScopedMixin):
     asset_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
     model_id: Mapped[str] = mapped_column(Text, primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -81,6 +89,7 @@ class StyleEmbedding(Base):
     __table_args__ = SCHEMA
     style_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), primary_key=True)
     model_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector())
 
 
 class LookJob(Base, UUIDPrimaryKey, WorkspaceScopedMixin):

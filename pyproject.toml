@@ -3,7 +3,16 @@ name = "faue-db"
 version = "0.1.0"
 description = "FAUE SQLAlchemy models and the single Alembic project"
 requires-python = ">=3.12"
-dependencies = ["sqlalchemy>=2.0", "alembic>=1.13", "pgvector"]
+# `faue_db.types.EncryptedStr` reaches into `faue_core.crypto`, so this is a
+# real dependency rather than a convention. Declared as a git reference because
+# faue-core is not on PyPI; pip resolves it the same way a service does.
+dependencies = [
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pgvector",
+    "python-dotenv",
+    "faue-core @ git+https://github.com/faueofficial/faue-core.git@v0.1.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["faue_db*"]

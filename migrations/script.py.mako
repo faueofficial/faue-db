@@ -11,6 +11,9 @@ nullable or defaulted; drops and tightening belong in a LATER release.
 
 from alembic import op
 import sqlalchemy as sa
+# autogenerate emits these types without importing them
+import pgvector.sqlalchemy
+import faue_db.types
 ${imports if imports else ""}
 
 revision = ${repr(up_revision)}
