@@ -3,15 +3,23 @@ name = "faue-db"
 version = "0.1.0"
 description = "FAUE SQLAlchemy models and the single Alembic project"
 requires-python = ">=3.12"
-# `faue_db.types.EncryptedStr` reaches into `faue_core.crypto`, so this is a
-# real dependency rather than a convention. Declared as a git reference because
-# faue-core is not on PyPI; pip resolves it the same way a service does.
+# `faue_db.types.EncryptedStr` reaches into `faue_core.crypto`, so faue-core is
+# a real runtime requirement — but it is deliberately NOT declared here.
+#
+# Pinning it to a git URL in a library makes that URL the only acceptable
+# source: a service installing faue-core from anywhere else (a different tag, a
+# local checkout, an editable install) gets `ResolutionImpossible`, because pip
+# sees two origins for one package. A bare name cannot work either, since
+# faue-core is not on PyPI.
+#
+# Every consumer installs faue-core explicitly, at a version it chooses. The
+# import is lazy, inside `EncryptedStr`, so faue_db imports fine without it and
+# fails only where the type is used — with a clear ImportError.
 dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "pgvector",
     "python-dotenv",
-    "faue-core @ git+https://github.com/faueofficial/faue-core.git@v0.1.0",
 ]
 
 [tool.setuptools.packages.find]
