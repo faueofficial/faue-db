@@ -32,8 +32,17 @@ def _load_env() -> None:
             found.append(candidate)
         if (directory / "docs" / "repos.yaml").is_file():
             break
+    # `override=True` with nearest LAST is what actually implements "nearest
+    # wins". python-dotenv defaults to `override=False`, so without this the
+    # first file loaded — the shared one furthest up — silently takes
+    # precedence, which is the opposite of what this loop is arranged to do.
+    #
+    # The real environment is restored afterwards so it still beats every file:
+    # Railway sets DATABASE_URL in the environment and has no .env at all.
+    real_environment = dict(os.environ)
     for path in reversed(found):
-        load_dotenv(path)
+        load_dotenv(path, override=True)
+    os.environ.update(real_environment)
 
 
 _load_env()
