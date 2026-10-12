@@ -16,7 +16,8 @@ requires-python = ">=3.12"
 # import is lazy, inside `EncryptedStr`, so faue_db imports fine without it and
 # fails only where the type is used — with a clear ImportError.
 dependencies = [
-    "sqlalchemy>=2.0",
+    # [asyncio] brings greenlet; see faue-core/pyproject.toml.
+    "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",
     "pgvector",
     "python-dotenv",

@@ -32,6 +32,8 @@ NOT_WORKSPACE_SCOPED = {
     "gateway.admin_users": "staff, not customers",
     "gateway.audit_log": "append-only compliance record across all workspaces",
     "gateway.outbox": "infrastructure",
+    "gateway.waitlist_entries": "a pre-launch signup; there is no account yet, and user_id is set only when the same email later signs up",
+    "gateway.contact_messages": "a website enquiry; the sender usually has no account, and user_id is set only when one exists",
     "ase.outbox": "infrastructure",
     "ase.style_embeddings": "shared style library content",
     "ase.style_library": "shared content",

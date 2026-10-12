@@ -10,8 +10,8 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    ARRAY, Boolean, Date, DateTime, ForeignKey, Index, Integer, SmallInteger,
-    String, Text, UniqueConstraint,
+    ARRAY, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, SmallInteger,
+    String, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -445,6 +445,139 @@ class AuditLog(Base, UUIDPrimaryKey):
     justification: Mapped[str | None] = mapped_column(Text)
     ip: Mapped[str | None] = mapped_column(INET)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# --- contact ----------------------------------------------------------------
+CONTACT_TOPICS = ("support", "data_request", "press_partnership", "other")
+CONTACT_PARTNER_TYPES = (
+    "tailor", "designer", "fabric_seller", "event_planner", "stylist_creator", "media", "other",
+)
+CONTACT_STATUSES = ("new", "replied", "closed")
+
+
+def _in(values: tuple[str, ...]) -> str:
+    return "(" + ", ".join(f"'{v}'" for v in values) + ")"
+
+
+class ContactMessage(Base, UUIDPrimaryKey):
+    """An enquiry sent from the website's contact or partners form.
+
+    Not workspace-scoped: the sender usually has no account. `user_id` is set only
+    when a valid session accompanied the request.
+
+    **Retention: 72 hours.** Every personal column (`*_enc`, `*_bidx`) is cleared
+    by the purge job three days after `created_at`, and `purged_at` is set. What
+    remains is a record that an enquiry existed: reference, topic, status and
+    dates. That residue holds nothing that identifies the sender. The privacy
+    notice promises this; changing the period means changing both.
+    """
+    __tablename__ = "contact_messages"
+    __table_args__ = (
+        CheckConstraint(f"topic IN {_in(CONTACT_TOPICS)}", name="topic"),
+        CheckConstraint(f"status IN {_in(CONTACT_STATUSES)}", name="status"),
+        CheckConstraint(
+            f"partner_type IS NULL OR partner_type IN {_in(CONTACT_PARTNER_TYPES)}",
+            name="partner_type"),
+        # The purge job scans only rows it has not cleared yet.
+        Index("ix_contact_messages_unpurged", "created_at", postgresql_where=text("purged_at IS NULL")),
+        SCHEMA,
+    )
+
+    #: What the sender is shown and quotes back, e.g. FAUE-7K4M2Q. Not the row id,
+    #: so a reference cannot be used to guess or enumerate rows.
+    reference: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, default="new", server_default="new", nullable=False)
+
+    # Personal data. Encrypted at rest, and set to NULL when the row is purged.
+    name_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    email_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    #: Lets one person's messages be found for export or erasure without
+    #: decrypting every row.
+    email_bidx: Mapped[str | None] = mapped_column(BlindIndex, index=True)
+    message_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    organisation_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    role_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    #: Keyed hash of the sender's IP, for abuse analysis only. Never the raw address.
+    ip_bidx: Mapped[str | None] = mapped_column(BlindIndex)
+
+    partner_type: Mapped[str | None] = mapped_column(Text)
+    #: The trace reference the app showed with an error, so support can find the
+    #: exact request. An opaque id, not personal data.
+    reference_code: Mapped[str | None] = mapped_column(Text)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    #: The privacy policy version the sender agreed to.
+    policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    #: From the Idempotency-Key header. A retry with the same key finds this row
+    #: and returns the same reference instead of creating a second message.
+    idempotency_key: Mapped[str | None] = mapped_column(Text, unique=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    #: When the FAUE team was emailed about this message.
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    handled_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- early access -----------------------------------------------------------
+WAITLIST_STATUSES = ("waiting", "invited", "joined", "unsubscribed")
+
+
+class WaitlistEntry(Base, UUIDPrimaryKey):
+    """Someone who took the Style DNA quiz on the website and asked to be told
+    when FAUE opens.
+
+    Not workspace-scoped: there is no account yet. `user_id` is filled in when the
+    same email address later signs up, which is how a waitlist member and their
+    account are linked without asking them to prove anything twice.
+
+    The username is a **reservation**, not an account. Nothing here authenticates
+    anyone; the sign-up flow checks it so another person cannot take the handle
+    someone already asked for.
+
+    Basis: consent, given at the form with the policy version recorded. Kept until
+    launch or until the person unsubscribes or asks for deletion.
+    """
+    __tablename__ = "waitlist_entries"
+    __table_args__ = (
+        CheckConstraint(f"status IN {_in(WAITLIST_STATUSES)}", name="status"),
+        SCHEMA,
+    )
+
+    email_enc: Mapped[bytes] = mapped_column(EncryptedStr, nullable=False)
+    #: One entry per address. Also how a repeat submission is recognised without
+    #: decrypting anything.
+    email_bidx: Mapped[str] = mapped_column(BlindIndex, unique=True, nullable=False)
+    #: As typed, for display.
+    username: Mapped[str] = mapped_column(String(24), nullable=False)
+    #: Lower-cased. Unique, so `Ada` and `ada` cannot both be reserved.
+    username_key: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)
+
+    # The Style DNA they got, so the card can be reproduced and the list can be
+    # grouped by style without re-scoring.
+    dna_quiz_version: Mapped[str] = mapped_column(Text, nullable=False)
+    dna_answers: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    dna_scores: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    dna_dominant: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    dna_alter_ego: Mapped[str | None] = mapped_column(Text)
+    dna_wildcard: Mapped[str | None] = mapped_column(Text)
+
+    status: Mapped[str] = mapped_column(Text, default="waiting", server_default="waiting", nullable=False)
+    source: Mapped[str] = mapped_column(Text, default="web_quiz", server_default="web_quiz", nullable=False)
+    #: The policy version in force when they agreed to be emailed.
+    policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    consented_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    ip_bidx: Mapped[str | None] = mapped_column(BlindIndex)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    #: When the confirmation email went out.
+    welcomed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unsubscribed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # --- outbox -----------------------------------------------------------------
