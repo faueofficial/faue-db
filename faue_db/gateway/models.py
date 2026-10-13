@@ -523,6 +523,7 @@ class ContactMessage(Base, UUIDPrimaryKey):
 
 # --- early access -----------------------------------------------------------
 WAITLIST_STATUSES = ("waiting", "invited", "joined", "unsubscribed")
+WAITLIST_GENDERS = ("female", "male", "prefer_not_to_say")
 
 
 class WaitlistEntry(Base, UUIDPrimaryKey):
@@ -543,6 +544,7 @@ class WaitlistEntry(Base, UUIDPrimaryKey):
     __tablename__ = "waitlist_entries"
     __table_args__ = (
         CheckConstraint(f"status IN {_in(WAITLIST_STATUSES)}", name="status"),
+        CheckConstraint(f"gender IS NULL OR gender IN {_in(WAITLIST_GENDERS)}", name="gender"),
         SCHEMA,
     )
 
@@ -554,6 +556,11 @@ class WaitlistEntry(Base, UUIDPrimaryKey):
     username: Mapped[str] = mapped_column(String(24), nullable=False)
     #: Lower-cased. Unique, so `Ada` and `ada` cannot both be reserved.
     username_key: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)
+
+    #: 'female', 'male' or 'prefer_not_to_say', from the dropdown. Used only to
+    #: choose the model photograph behind their Style DNA card. NULL for entries made before it
+    #: was asked.
+    gender: Mapped[str | None] = mapped_column(String(20))
 
     # The Style DNA they got, so the card can be reproduced and the list can be
     # grouped by style without re-scoring.
