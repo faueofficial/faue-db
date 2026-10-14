@@ -750,3 +750,66 @@ class Outbox(Base, UUIDPrimaryKey):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class CommunityPost(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A look its owner chose to show to other people on FAUE.
+
+    Public by the owner's explicit act, and anonymous to readers: nothing in a
+    feed response names the person. `title`, `image_url`, `occasion` and `recipe`
+    are a snapshot taken from the look when it was published, so the post does not
+    change or disappear if the look does. `persona` is the owner's dominant Style
+    DNA at the time and is what a feed is ranked by.
+    """
+    __tablename__ = "community_posts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "look_id"),
+        Index("ix_community_posts_feed", "status", "persona", "created_at"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    look_id: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
+    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+    occasion: Mapped[str | None] = mapped_column(Text)
+    caption: Mapped[str | None] = mapped_column(String(140))
+    persona: Mapped[str | None] = mapped_column(String(8))
+    recipe: Mapped[dict | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="published")  # published | removed | hidden
+    likes_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    copies_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reports_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CommunityLike(Base, WorkspaceScopedMixin):
+    __tablename__ = "community_likes"
+    __table_args__ = SCHEMA
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.community_posts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CommunityCopy(Base, WorkspaceScopedMixin):
+    """Someone took a post's recipe as the start of their own look."""
+    __tablename__ = "community_copies"
+    __table_args__ = SCHEMA
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.community_posts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CommunityReport(Base, WorkspaceScopedMixin):
+    __tablename__ = "community_reports"
+    __table_args__ = SCHEMA
+    post_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.community_posts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), primary_key=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
