@@ -55,6 +55,9 @@ class User(Base, UUIDPrimaryKey, TimestampMixin):
     status: Mapped[str] = mapped_column(Text, default="active", nullable=False)
     age_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Set when the person restricted processing (`POST /privacy/restrict`). The
+    #: account stays usable; optional processing stops until it is lifted.
+    restricted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuthIdentity(Base, UUIDPrimaryKey):
@@ -76,6 +79,9 @@ class AuthIdentity(Base, UUIDPrimaryKey):
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     phone_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
     phone_bidx: Mapped[str | None] = mapped_column(BlindIndex)
+    #: A code sent to the number was entered. SMS and WhatsApp go only to a
+    #: verified number, for the same reason email goes only to a verified address.
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text)  # Apple sends this once only
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -158,6 +164,108 @@ class DeletionLedger(Base, UUIDPrimaryKey):
     modules_done: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
     third_parties_done: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the data is actually removed. Between the request and this date the
+    #: account is only marked, so a deletion made by mistake can be undone.
+    #: Null on rows from before the waiting period existed (already purged).
+    purge_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: The person (or an admin) took the request back inside the waiting period.
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RuntimeSetting(Base):
+    """A non-secret value an operator tuned from the admin console.
+
+    Only keys that differ from their default have a row. The closed set of keys,
+    their types and their bounds live in code (`app.modules.runtime_config`), so
+    a stray row cannot change anything the code does not already allow.
+    """
+    __tablename__ = "runtime_settings"
+    __table_args__ = SCHEMA
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False)   # {"v": <number or bool>}
+    reason: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FeatureFlag(Base):
+    """A switch an operator can flip without a deploy.
+
+    Only keys that differ from their default are stored; the closed set of keys
+    and their defaults live in code (`app.modules.flags`). The row records who
+    changed it, when, and why.
+    """
+    __tablename__ = "feature_flags"
+    __table_args__ = SCHEMA
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ShareEvent(Base, UUIDPrimaryKey):
+    """Something of FAUE's was shared out: a Style DNA card sent to Stories or as
+    a post, a link copied, the native share sheet used, or a shared link opened.
+
+    Anonymous on purpose: no user, no address, no IP. It exists to count, and the
+    website can record one before there is an account.
+    """
+    __tablename__ = "share_events"
+    __table_args__ = (Index("ix_share_events_created", "created_at"), SCHEMA)
+    #: story | post | link | native | view
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    #: web | app
+    surface: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Dominant persona id on the card, when known.
+    persona: Mapped[str | None] = mapped_column(String(2))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SharedItem(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A look someone shared to FAUE: a link from TikTok, Instagram or Pinterest,
+    an image, or both.
+
+    Only the link and what its platform publishes for it (author, caption,
+    preview address) are kept. `title` and `author_name` are written by strangers
+    and are untrusted text. `asset_id` is the cleaned copy that went through the
+    PII pipeline, and is what analysis uses.
+    """
+    __tablename__ = "shared_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_url"),
+        Index("ix_shared_items_user_created", "user_id", "created_at"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)        # tiktok | instagram | pinterest | image
+    source_url: Mapped[str | None] = mapped_column(Text)             # canonical; null for an image alone
+    title: Mapped[str | None] = mapped_column(Text)
+    author_name: Mapped[str | None] = mapped_column(Text)
+    thumbnail_url: Mapped[str | None] = mapped_column(Text)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.assets.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(Text, nullable=False)        # ready | needs_image
+    reason: Mapped[str | None] = mapped_column(Text)                 # no_preview | unavailable
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DataExport(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A copy of everything held about a person, prepared for them to download.
+
+    `payload` is encrypted: the archive is the most concentrated personal data
+    in the system. It expires after seven days and is deleted with the account.
+    """
+    __tablename__ = "data_exports"
+    __table_args__ = (Index("ix_data_exports_user", "user_id"), SCHEMA)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)   # ready | expired
+    payload: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # --- style DNA --------------------------------------------------------------
@@ -249,6 +357,9 @@ class Asset(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the stored images were removed (`status` is then `deleted`). The row
+    #: stays as a tombstone so records that referenced it keep their shape.
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # --- vault ------------------------------------------------------------------
@@ -344,6 +455,41 @@ class IntegrationAccount(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ImportedPin(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A pin the user chose to import from a connected account.
+
+    Private to the user and never republished. Deleted with the connection and
+    with the account. The title and description are **untrusted text** written by
+    strangers: they are kept apart from anything the models are told to do, and
+    only ever passed to a model inside a delimited block.
+
+    `asset_id` is the cleaned copy that went through the PII pipeline. It stays
+    null, with `image_status = 'pending_detector'`, where no real face and text
+    detector exists, so an image is never cached unredacted.
+    """
+    __tablename__ = "imported_pins"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "pin_id"),
+        Index("ix_imported_pins_user_board", "user_id", "board_id"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    board_id: Mapped[str] = mapped_column(Text, nullable=False)
+    board_name: Mapped[str] = mapped_column(Text, nullable=False)
+    pin_id: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    #: The provider's own CDN address, kept so the image can be cached later.
+    image_url: Mapped[str | None] = mapped_column(Text)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.assets.id", ondelete="SET NULL"))
+    #: cached | pending_detector | rejected | failed | none
+    image_status: Mapped[str] = mapped_column(Text, nullable=False)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 # --- notify (module — extractable) ------------------------------------------
 class NotifyPreference(Base, WorkspaceScopedMixin):
     __tablename__ = "notify_preferences"
@@ -396,6 +542,9 @@ class NotifyInbox(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     deeplink: Mapped[str | None] = mapped_column(Text)
     image_url: Mapped[str | None] = mapped_column(Text)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: Which delivery this came from, so reading it can mark that delivery opened.
+    template_id: Mapped[str | None] = mapped_column(Text)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
