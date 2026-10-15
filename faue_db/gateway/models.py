@@ -813,3 +813,59 @@ class CommunityReport(Base, WorkspaceScopedMixin):
         PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), primary_key=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+EVENT_KINDS = ("wedding", "owambe", "church", "naming", "work", "travel", "other")
+EVENT_REMINDERS = ("none", "1d", "3d", "7d")
+NOTE_SOURCES = ("user", "learned")
+
+
+class UserEvent(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A dated occasion the person wants to dress for. Only the title, day, kind and a city are kept:
+    ASE plans looks and weather from those, and nothing is read from a calendar."""
+    __tablename__ = "user_events"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {_in(EVENT_KINDS)}", name="kind"),
+        CheckConstraint(f"remind IN {_in(EVENT_REMINDERS)}", name="remind"),
+        Index("ix_user_events_user_day", "user_id", "starts_on"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="other")
+    starts_on: Mapped[date] = mapped_column(Date, nullable=False)
+    city: Mapped[str | None] = mapped_column(String(60))
+    has_fabric: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    remind: Mapped[str] = mapped_column(String(8), nullable=False, default="3d")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Tailor(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A tailor the person sends briefs to. The number is personal data about a third party that the
+    owner chose to give us, so it is encrypted, shown only to the owner, and deleted with the account."""
+    __tablename__ = "tailors"
+    __table_args__ = (Index("ix_tailors_user", "user_id"), SCHEMA)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    phone_enc: Mapped[bytes | None] = mapped_column(EncryptedStr)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AseNote(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """Something the person told ASE about their taste, in their own words, or something ASE noticed.
+    The person can pause or forget any of them; ASE reads only the active ones."""
+    __tablename__ = "ase_notes"
+    __table_args__ = (
+        CheckConstraint(f"source IN {_in(NOTE_SOURCES)}", name="source"),
+        Index("ix_ase_notes_user", "user_id", "created_at"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    text: Mapped[str] = mapped_column(String(300), nullable=False)
+    source: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
