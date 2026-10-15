@@ -1,6 +1,6 @@
 [project]
 name = "faue-db"
-version = "0.4.0"
+version = "0.5.0"
 description = "FAUE SQLAlchemy models and the single Alembic project"
 requires-python = ">=3.12"
 # `faue_db.types.EncryptedStr` reaches into `faue_core.crypto`, so faue-core is

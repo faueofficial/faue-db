@@ -817,6 +817,8 @@ class CommunityReport(Base, WorkspaceScopedMixin):
 
 EVENT_KINDS = ("wedding", "owambe", "church", "naming", "work", "travel", "other")
 EVENT_REMINDERS = ("none", "1d", "3d", "7d")
+#: Lead times a person can pick together: the day itself and 1, 3 and 7 days before.
+EVENT_REMINDER_OFFSETS = ("0d", "1d", "3d", "7d")
 NOTE_SOURCES = ("user", "learned")
 
 
@@ -837,7 +839,12 @@ class UserEvent(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     starts_on: Mapped[date] = mapped_column(Date, nullable=False)
     city: Mapped[str | None] = mapped_column(String(60))
     has_fabric: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Legacy single reminder, kept in step with `reminders` (its first value, or "none") so older readers keep working.
     remind: Mapped[str] = mapped_column(String(8), nullable=False, default="3d")
+    #: Every lead time the person chose, e.g. ["7d", "1d", "0d"]. Empty means no reminders.
+    reminders: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    #: Lead times already sent, so a reminder goes out once.
+    reminded: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
