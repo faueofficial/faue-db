@@ -7,8 +7,8 @@ Create Date: 2026-10-14
 Operator-controlled switches. EXPAND-ONLY: one new table.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0016_feature_flags'
 down_revision = '0015_media_lifecycle'

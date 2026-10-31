@@ -8,8 +8,8 @@ Looks people chose to show to others, with likes, copies and reports.
 EXPAND-ONLY: four new tables.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = '0021_community'

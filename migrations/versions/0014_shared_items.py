@@ -9,8 +9,8 @@ Looks shared to FAUE from TikTok, Instagram or Pinterest, or as an image.
 EXPAND-ONLY: one new table.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0014_shared_items'
 down_revision = '0013_deletion_grace'

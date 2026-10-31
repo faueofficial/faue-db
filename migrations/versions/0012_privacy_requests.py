@@ -10,8 +10,8 @@ archive a person asked for until it expires.
 EXPAND-ONLY: one nullable column and one new table.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0012_privacy_requests'
 down_revision = '0011_imported_pins'

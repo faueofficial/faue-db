@@ -12,13 +12,22 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    ARRAY, Boolean, DateTime, Float, ForeignKey, Integer, Numeric,
-    SmallInteger, Text,
+    ARRAY,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Mapped, mapped_column
 
 from faue_db.base import Base, UUIDPrimaryKey, WorkspaceScopedMixin
@@ -94,7 +103,11 @@ class StyleEmbedding(Base):
 
 class LookJob(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     __tablename__ = "look_jobs"
-    __table_args__ = SCHEMA
+    __table_args__ = (
+        Index("uq_look_jobs_user_key", "user_id", "idempotency_key", unique=True,
+              postgresql_where=text("idempotency_key IS NOT NULL")),
+        SCHEMA,
+    )
     user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
     source: Mapped[str] = mapped_column(Text, nullable=False)
     request: Mapped[dict] = mapped_column(JSONB, nullable=False)
@@ -104,6 +117,13 @@ class LookJob(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     stage_failed: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # job plane (0026): idempotency, attempts, and the outcome. A failed job is not counted against the person.
+    kind: Mapped[str] = mapped_column(Text, default="generate", server_default="generate", nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0", nullable=False)
+    counted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    result: Mapped[dict | None] = mapped_column(JSONB)
+    provenance: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Look(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
@@ -124,6 +144,11 @@ class Look(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     model_id: Mapped[str | None] = mapped_column(Text)
     prompt_version: Mapped[str | None] = mapped_column(Text)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # job plane (0026): the chain a regenerate or adjust belongs to, and the whole public record as served
+    parent_look_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    mode: Mapped[str | None] = mapped_column(Text)
+    pack_hash: Mapped[str | None] = mapped_column(Text)
+    record: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class LookImpression(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
@@ -294,6 +319,9 @@ class ModelCall(Base, UUIDPrimaryKey):
     guardrail_verdict: Mapped[str | None] = mapped_column(Text)
     trace_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    # 0026: how the call was answered (model | cache | template) and, for a template, why (no_consent, budget, ...)
+    source: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
 
 
 class Budget(Base):
@@ -317,3 +345,34 @@ class AseOutbox(Base, UUIDPrimaryKey):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class MemoryEvent(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """The append-only log behind 'what ASE knows' (ase-architecture 4.8). Preferences are a pure function of these rows,
+    so the same stream always rebuilds the same state. Attributes only: no image, no free text."""
+    __tablename__ = "memory_events"
+    __table_args__ = SCHEMA
+    user_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
+    half_life: Mapped[float] = mapped_column(Float, nullable=False)
+    look_id: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    item_ids: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    colours: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    fabrics: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    occasion: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    exploration: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+
+
+class KillSwitch(Base):
+    """A named capability an admin has switched off (a model task, the generative renderer, the whole model plane). Read on
+    every router call; a switched-off task takes its template path."""
+    __tablename__ = "kill_switches"
+    __table_args__ = SCHEMA
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    disabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    set_by: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

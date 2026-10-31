@@ -19,8 +19,6 @@ role, so it is scoped to `faue_migrator`, which is the only role that runs DDL.
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 revision = '0007_default_grants'
 down_revision = '0006_asset_backup'

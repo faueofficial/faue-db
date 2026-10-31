@@ -30,5 +30,8 @@ include = ["faue_db*"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+ignore = ["SIM102", "SIM103"]  # stylistic rewrites
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

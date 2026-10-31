@@ -16,12 +16,11 @@ a reference, topic, status and dates. Default privileges from `0007` already
 grant the service role access, so no GRANT is needed here.
 """
 
-from alembic import op
-import sqlalchemy as sa
 # autogenerate emits these types without importing them
-import pgvector.sqlalchemy
-import faue_db.types
+import sqlalchemy as sa
+from alembic import op
 
+import faue_db.types
 
 revision = '0008_contact_messages'
 down_revision = '0007_default_grants'

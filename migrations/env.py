@@ -10,12 +10,12 @@ import os
 from logging.config import fileConfig
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 from alembic import context
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from faue_db.registry import metadata
+
 
 # Read .env before anything looks at DATABASE_URL. Without this, `alembic
 # upgrade head` fails with an empty URL in a shell where .env is right there.

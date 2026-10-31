@@ -9,12 +9,11 @@ and safe to leave in place if that code is rolled back. Additive columns are
 nullable or defaulted; drops and tightening belong in a LATER release.
 """
 
-from alembic import op
-import sqlalchemy as sa
 # autogenerate emits these types without importing them
-import pgvector.sqlalchemy
-import faue_db.types
+import sqlalchemy as sa
+from alembic import op
 
+import faue_db.types
 
 revision = '0004_admin_totp'
 down_revision = '0003_notify_channel_key'

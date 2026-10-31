@@ -10,14 +10,26 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    ARRAY, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, SmallInteger,
-    String, Text, UniqueConstraint, func, text,
+    ARRAY,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from faue_db.base import Base, TimestampMixin, UUIDPrimaryKey, WorkspaceScopedMixin, uuid7
+from faue_db.base import Base, TimestampMixin, UUIDPrimaryKey, WorkspaceScopedMixin
 from faue_db.types import BlindIndex, EncryptedStr
 
 SCHEMA = {"schema": "gateway"}
@@ -81,7 +93,7 @@ class AuthIdentity(Base, UUIDPrimaryKey):
     phone_bidx: Mapped[str | None] = mapped_column(BlindIndex)
     #: A code sent to the number was entered. SMS and WhatsApp go only to a
     #: verified number, for the same reason email goes only to a verified address.
-    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     display_name: Mapped[str | None] = mapped_column(Text)  # Apple sends this once only
     linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -848,6 +860,25 @@ class UserEvent(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class AgentSettings(Base, WorkspaceScopedMixin):
+    """How the daily suggestion behaves for one person. A row exists only once they change something; until then the defaults
+    in the gateway apply (off, 08:00 Lagos, weather on, level 0: a suggestion when the app opens)."""
+    __tablename__ = "agent_settings"
+    __table_args__ = (
+        CheckConstraint("daily_hour_local BETWEEN 0 AND 23", name="hour"),
+        CheckConstraint("autonomy_level BETWEEN 0 AND 3", name="level"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), primary_key=True)
+    daily_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_hour_local: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=8)
+    use_weather: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: 0 on open, 1 daily push, 2 proactive triggers, 3 planning. Only 0 is built; the rest are stored for when they are.
+    autonomy_level: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Tailor(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     """A tailor the person sends briefs to. The number is personal data about a third party that the
     owner chose to give us, so it is encrypted, shown only to the owner, and deleted with the account."""
@@ -876,3 +907,93 @@ class AseNote(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     source: Mapped[str] = mapped_column(String(8), nullable=False, default="user")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+# --- admin: account actions, reviewers and content review ---------------------
+NOTE_KINDS = ("note", "flag")
+#: What can be held on an account, and what each stops. `suspended` ends sign-in; the rest stop one feature while the
+#: person keeps using the rest of the app.
+HOLD_KINDS = ("suspended", "ai_blocked", "upload_blocked", "community_muted")
+REVIEW_KINDS = ("style_card", "rule", "archetype", "garment", "fabric", "reference")
+REVIEW_STATUSES = ("pending", "approved", "changes_requested", "rejected")
+
+
+class AccountNote(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """A note a staff member left on an account. Text one person wrote about another, so it goes with the account
+    when the account is deleted; the audit log keeps the fact that it was written, not what it said."""
+    __tablename__ = "account_notes"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {_in(NOTE_KINDS)}", name="kind"),
+        Index("ix_account_notes_user", "user_id", "created_at"),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    admin_id: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False, default="note")
+    body: Mapped[str] = mapped_column(String(1000), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AccountHold(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
+    """Something staff stopped on an account, with a reason and, optionally, an end date. Lifting one keeps the row."""
+    __tablename__ = "account_holds"
+    __table_args__ = (
+        CheckConstraint(f"kind IN {_in(HOLD_KINDS)}", name="kind"),
+        Index("ix_account_holds_active", "user_id", "kind", postgresql_where=text("lifted_at IS NULL")),
+        SCHEMA,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.users.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    set_by: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lifted_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    lift_reason: Mapped[str | None] = mapped_column(String(500))
+
+
+class ReviewerProfile(Base):
+    """What an admin account that reviews content is a reviewer OF. The account, its role and its sign-in live in
+    `admin_users`; this adds the traditions, regions and languages they are asked about."""
+    __tablename__ = "reviewer_profiles"
+    __table_args__ = SCHEMA
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("gateway.admin_users.id", ondelete="CASCADE"), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    traditions: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    regions: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    languages: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'"))
+    bio: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ContentReview(Base, UUIDPrimaryKey):
+    """One version of one piece of cultural content (a style card, a rule, an archetype look, a garment or a cloth
+    entry) waiting for, or carrying, a named reviewer's decision. A new version of the content is a new row, so a
+    sign-off never silently covers text that changed after it."""
+    __tablename__ = "content_reviews"
+    __table_args__ = (
+        CheckConstraint(f"content_kind IN {_in(REVIEW_KINDS)}", name="kind"),
+        CheckConstraint(f"status IN {_in(REVIEW_STATUSES)}", name="status"),
+        UniqueConstraint("content_kind", "content_id", "content_hash", name="uq_content_review_version"),
+        Index("ix_content_reviews_queue", "status", "tradition"),
+        SCHEMA,
+    )
+    content_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    content_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    tradition: Mapped[str | None] = mapped_column(String(40))
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
+    decision_note: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

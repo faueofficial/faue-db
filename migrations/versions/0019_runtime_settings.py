@@ -7,8 +7,8 @@ Create Date: 2026-10-14
 Non-secret values an operator can tune from the console. EXPAND-ONLY: one table.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = '0019_runtime_settings'

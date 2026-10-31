@@ -13,8 +13,8 @@ EXPAND-ONLY: a nullable column and a check that allows NULL. Safe to run before 
 code that uses it and safe to leave in place if that code is rolled back.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0010_waitlist_gender'
 down_revision = '0009_waitlist_entries'

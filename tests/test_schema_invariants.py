@@ -15,9 +15,8 @@ expensive:
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import inspect
 
-from faue_db.base import Base, WorkspaceScopedMixin
+from faue_db.base import Base
 from faue_db.registry import metadata
 
 # Models legitimately outside a workspace. Every entry states WHY — an exemption

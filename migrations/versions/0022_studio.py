@@ -7,8 +7,9 @@ Create Date: 2026-10-15
 EXPAND-ONLY: three new tables.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
+
 import faue_db.types
 
 revision = '0022_studio'

@@ -11,8 +11,8 @@ needs to say which delivery it was.
 EXPAND-ONLY: two nullable columns.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0020_inbox_delivery_link'
 down_revision = '0019_runtime_settings'

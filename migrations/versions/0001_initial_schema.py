@@ -11,10 +11,11 @@ and safe to leave in place if that code is rolled back. Additive columns are
 nullable or defaulted; drops and tightening belong in a LATER release.
 """
 
-from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 import pgvector.sqlalchemy
+import sqlalchemy as sa
+from alembic import op
+from sqlalchemy.dialects import postgresql
+
 import faue_db.types
 
 revision = '0001_initial'

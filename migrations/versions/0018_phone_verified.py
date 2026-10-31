@@ -8,8 +8,8 @@ SMS and WhatsApp send only to a number the person proved they hold.
 EXPAND-ONLY: one column with a default.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0018_phone_verified'
 down_revision = '0017_audit_retention'

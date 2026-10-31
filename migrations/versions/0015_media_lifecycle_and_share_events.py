@@ -10,8 +10,8 @@ counts FAUE content being shared out, without recording who.
 EXPAND-ONLY: one nullable column and one new table.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0015_media_lifecycle'
 down_revision = '0014_shared_items'

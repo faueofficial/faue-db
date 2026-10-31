@@ -11,8 +11,8 @@ request that was taken back.
 EXPAND-ONLY: two nullable columns.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = '0013_deletion_grace'
 down_revision = '0012_privacy_requests'

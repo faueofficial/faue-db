@@ -7,8 +7,8 @@ Create Date: 2026-10-15
 EXPAND-ONLY: two JSONB columns. `remind` stays and is kept in step by the gateway.
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = '0023_event_reminders'

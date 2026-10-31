@@ -12,9 +12,8 @@ if that code is rolled back. Default privileges from `0007` already grant the
 service role access.
 """
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from alembic import op
 
 revision = '0011_imported_pins'
 down_revision = '0010_waitlist_gender'

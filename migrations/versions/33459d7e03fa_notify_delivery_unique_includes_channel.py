@@ -15,12 +15,8 @@ so every row that satisfied the old key satisfies the new one. Code written
 against the old key keeps working — it simply could not use the second channel.
 """
 
-from alembic import op
-import sqlalchemy as sa
 # autogenerate emits these types without importing them
-import pgvector.sqlalchemy
-import faue_db.types
-
+from alembic import op
 
 revision = '0003_notify_channel_key'
 down_revision = '0002_revoked_reason'
