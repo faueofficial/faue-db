@@ -366,6 +366,18 @@ class MemoryEvent(Base, UUIDPrimaryKey, WorkspaceScopedMixin):
     exploration: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
 
 
+class ModelChoice(Base):
+    """The models an admin chose for a tier or a task, in the order to try them, in place of models.yaml. Deleting the row goes back to
+    the file. Read by the router every few seconds."""
+    __tablename__ = "model_choices"
+    __table_args__ = SCHEMA
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    models: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    set_by: Mapped[uuid.UUID] = mapped_column(PgUUID(as_uuid=True), nullable=False)
+    set_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class KillSwitch(Base):
     """A named capability an admin has switched off (a model task, the generative renderer, the whole model plane). Read on
     every router call; a switched-off task takes its template path."""
