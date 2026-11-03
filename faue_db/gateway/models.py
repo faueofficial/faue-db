@@ -997,3 +997,26 @@ class ContentReview(Base, UUIDPrimaryKey):
     decision_note: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# --- system status ----------------------------------------------------------
+class StatusCheck(Base, UUIDPrimaryKey):
+    """One probe of one part of the system: the API, Postgres, Redis, RabbitMQ, ASE or a worker.
+
+    Written once a minute by the `status_probe` worker and kept for 90 days, so the admin console (and later a public
+    status page) can show uptime per day and when each incident started and ended. `status` is `up`, `degraded` (serving
+    but something is wrong, e.g. a worker running while every pass fails) or `down`; `reason` says why when it is not up.
+    A minute with no rows means the probe itself was not running, and is shown as no data rather than as up.
+    """
+    __tablename__ = "status_checks"
+    __table_args__ = (
+        CheckConstraint("status IN ('up', 'degraded', 'down')", name="status_known"),
+        Index("ix_status_checks_component_checked_at", "component", "checked_at"),
+        Index("ix_status_checks_checked_at", "checked_at"),
+        SCHEMA,
+    )
+    component: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
